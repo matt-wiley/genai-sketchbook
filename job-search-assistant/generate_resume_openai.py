@@ -29,7 +29,7 @@ def generate_openai_prompt(job_history, job_description):
                 "start_date": role['start_date'],
                 "end_date": role['end_date'] or "Present",
                 "description": role['description'],
-                "notes": [note['summary'] for note in role['notes'] if note['is_enabled']]
+                "notes": [note['summary'] for note in role['notes']]
             })
     
     # Constructing the prompt to be sent to OpenAI
@@ -81,15 +81,18 @@ def generate_resume_with_openai(job_history_file, job_description_file, output_f
     openai.api_key = openai_api_key
     
     # Call OpenAI to generate the résumé
-    response = openai.Completion.create(
-        engine=os.getenv('OPENAI_MODEL', 'gpt-4o-2024-05-13'),  # Read engine from environment variable
-        prompt=prompt,
+    response = openai.chat.completions.create(
+        model=os.getenv('OPENAI_MODEL', 'gpt-4o-2024-05-13'),  # Read engine from environment variable
+        messages=[
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": "Generate a résumé based on the job history and job description."}
+        ],
         max_tokens=1500,            # Adjust based on how detailed you want the résumé to be
         temperature=0.7             # Adjust for creativity level; 0.7 should keep it balanced
     )
     
     # Extract the generated résumé text
-    resume_text = response['choices'][0]['text'].strip()
+    resume_text = response.choices[0].message.content
     
     # Write the résumé to the output file
     with open(output_file, 'w', encoding='utf-8') as file:
@@ -99,3 +102,7 @@ def generate_resume_with_openai(job_history_file, job_description_file, output_f
 
 # Example usage
 # generate_resume_with_openai('job_history.json', 'job_description.txt', 'tailored_resume_openai.txt')
+
+
+if __name__ == "__main__":
+    generate_resume_with_openai('job_history.json', 'job_description.txt', 'tailored_resume_openai.txt')
