@@ -7,6 +7,7 @@ import hashlib
 from PIL import Image
 from io import BytesIO
 from playwright.async_api import async_playwright
+from playwright.async_api import Page
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -128,7 +129,7 @@ async def take_screenshot(url, output_path):
 
     async with async_playwright() as p:
         browser = await p.chromium.launch()
-        page = await browser.new_page()
+        page : Page = await browser.new_page()
         page.set_viewport_size({"width": view_width, "height": view_height})
         await page.goto(url)
         await page.screenshot(path=output_path)
