@@ -82,7 +82,7 @@ def generate_resume_with_openai(job_history_file, job_description_file, output_f
     
     # Call OpenAI to generate the résumé
     response = openai.Completion.create(
-        engine="text-davinci-004",  # Update with the appropriate engine/version you have access to
+        engine=os.getenv('OPENAI_MODEL', 'text-davinci-004'),  # Update with the appropriate engine/version you have access to
         prompt=prompt,
         max_tokens=1500,            # Adjust based on how detailed you want the résumé to be
         temperature=0.7             # Adjust for creativity level; 0.7 should keep it balanced
