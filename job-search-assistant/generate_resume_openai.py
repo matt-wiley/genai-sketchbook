@@ -1,6 +1,7 @@
 import os
 import json
 import openai
+import time
 
 from dotenv import load_dotenv
 
@@ -48,7 +49,6 @@ def generate_openai_prompt(job_history, job_description):
         prompt += (
             f"Role: {experience['role_title']} at {experience['employer']} ({experience['location']})\n"
             f"Period: {experience['start_date']} to {experience['end_date']}\n"
-            f"Description: {experience['description'] or 'No description provided'}\n"
             "Key Achievements:\n"
         )
         for note in experience['notes']:
@@ -57,8 +57,11 @@ def generate_openai_prompt(job_history, job_description):
     
     prompt += (
         "Please create a one-page professional résumé, ensuring the content is concise and aligns with the job description. "
-        "Start with a brief summary of relevant skills, then highlight the most relevant work experiences, emphasizing skills, "
+        "Start with a two-sentence summary of relevant skills, then highlight the most relevant work experiences, emphasizing skills, "
         "responsibilities, and achievements that match the job description. The résumé should maintain a professional tone."
+        "Only generate the following sections: \"Summary\", \"Professional Experience\", \"Technical Skills\""
+        "Do not generate metrics or specific numbers unless they are provided in the Key Achievements section."
+        "Omit any achievements or experiences that are not relevant to the job description."
     )
     
     return prompt
@@ -85,10 +88,13 @@ def generate_resume_with_openai(job_history_file, job_description_file, output_f
         model=os.getenv('OPENAI_MODEL', 'gpt-4o-2024-05-13'),  # Read engine from environment variable
         messages=[
             {"role": "system", "content": prompt},
-            {"role": "user", "content": "Generate a résumé based on the job history and job description."}
+            {"role": "user", "content": (
+                "Generate a résumé based on the job history and job description."
+                "The résumé should be tailored to the job description and the company's needs."
+            )}
         ],
         max_tokens=1500,            # Adjust based on how detailed you want the résumé to be
-        temperature=0.7             # Adjust for creativity level; 0.7 should keep it balanced
+        temperature=0.5             # Adjust for creativity level; 0.7 should keep it balanced
     )
     
     # Extract the generated résumé text
@@ -105,4 +111,7 @@ def generate_resume_with_openai(job_history_file, job_description_file, output_f
 
 
 if __name__ == "__main__":
-    generate_resume_with_openai('job_history.json', 'job_description.txt', 'tailored_resume_openai.txt')
+    # generate a timestamp
+    timestamp = str(time.strftime("%Y%m%d%H%M%S", time.localtime()))
+
+    generate_resume_with_openai('.local/job_history.json', '.local/job_description.txt', f'.local/tailored_resume_openai_{timestamp}.md')
