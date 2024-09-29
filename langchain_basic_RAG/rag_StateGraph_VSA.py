@@ -1,6 +1,9 @@
 import os
 import sys
 import uuid
+import time
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
 from langchain_community.document_loaders import DirectoryLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_openai import OpenAIEmbeddings
@@ -19,25 +22,70 @@ DOCUMENTS_DIR = os.getenv("DOCUMENTS_DIR", None)
 
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 100
-K_RETRIEVAL = 6
+BASE_K_RETRIEVAL = 6
+TEMPERATURE = 0.5
+MAX_TOKENS = 500
+
+
+print("----------------------------------")
 
 # 1. Load Markdown files from a directory
+
+print(f"Loading documents from {DOCUMENTS_DIR}... ", end="")
+
+start = time.time()
 loader = DirectoryLoader(DOCUMENTS_DIR, glob="**/*.md")
 documents = loader.load()
+end = time.time()
+
+print(f"done. {len(documents)} documents loaded in {end - start:.2f} seconds.")
+
 
 # 2. Split documents into chunks
+
+print("Splitting documents into chunks... ", end="")
+
+start = time.time()
 text_splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP)
 texts = text_splitter.split_documents(documents)
+end = time.time()
+
+print(f"done. {len(texts)} text chunks created in {end - start:.2f} seconds.")
 
 # 3. Create embeddings and store in vector database
+
+print("Creating embeddings and storing in vector database... ", end="")
+start = time.time()
+
 embeddings = OpenAIEmbeddings()
+
+# Calculate average vector of the document corpus
+doc_vectors = [embeddings.embed_query(doc.page_content) for doc in texts]
+average_vector = np.mean(doc_vectors, axis=0)
+
 vectorstore = Chroma.from_documents(texts, embeddings)
 
-# 4. Create a retriever
-retriever = vectorstore.as_retriever(search_kwargs={"k": K_RETRIEVAL})
+end = time.time()
+print(f"done. {len(texts)} vectors stored in vector database in {end - start:.2f} seconds.")
 
-# 5. Create an LLM (Claude)
-model = OpenAI(temperature=0)
+
+# 4. Create an adaptive retriever
+def calculate_query_specificity(query, embeddings, average_vector):
+    query_vector = embeddings.embed_query(query)
+    similarity = cosine_similarity([query_vector], [average_vector])[0][0]
+    specificity = 1 - similarity
+    return specificity
+
+def adaptive_retriever(query):
+    specificity = calculate_query_specificity(query, embeddings, average_vector)
+    adjusted_k = max(1, min(20, int(BASE_K_RETRIEVAL * (1 + specificity))))
+    return vectorstore.similarity_search(query, k=adjusted_k)
+
+print("Creating the RAG system ...", end="")
+start = time.time()
+
+# 5. Create an LLM (OpenAI)
+model = OpenAI(temperature=TEMPERATURE, max_tokens=MAX_TOKENS)
 
 # 6. Define the LangGraph workflow
 workflow = StateGraph(state_schema=MessagesState)
@@ -45,7 +93,7 @@ workflow = StateGraph(state_schema=MessagesState)
 # 7. Define the function that calls the model and retriever
 def call_rag(state: MessagesState):
     human_message = state["messages"][-1]
-    context = retriever.invoke(human_message.content)
+    context = adaptive_retriever(human_message.content)
     context_str = "\n".join(doc.page_content for doc in context)
     
     messages = [
@@ -64,6 +112,10 @@ workflow.add_edge("rag", END)
 memory = MemorySaver()
 app = workflow.compile(checkpointer=memory)
 
+end = time.time()
+print(f"done. RAG system created in {end - start:.2f} seconds.")
+print("----------------------------------")
+
 # 10. Function to interact with the RAG system
 def ask_question(question, thread_id):
     config = {"configurable": {"thread_id": thread_id}}
@@ -76,7 +128,7 @@ def ask_question(question, thread_id):
 
 # Example usage
 if __name__ == "__main__":
-    print("Welcome to the LangGraph RAG system. Type 'quit' to exit.")
+    print("Welcome to the Adaptive LangGraph RAG system. Type 'quit' to exit.")
     
     # Create a unique thread ID for this conversation
     thread_id = str(uuid.uuid4())
@@ -89,4 +141,4 @@ if __name__ == "__main__":
         answer = ask_question(user_question, thread_id)
         print(f"\nAnswer: {answer}")
 
-print("Thank you for using the LangGraph RAG system. Goodbye!")
+print("Thank you for using the Adaptive LangGraph RAG system. Goodbye!")
