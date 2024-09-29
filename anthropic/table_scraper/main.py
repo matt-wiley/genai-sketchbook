@@ -1,50 +1,33 @@
-from playwright.sync_api import sync_playwright
-import csv
 import os
-import sys
-import argparse
 
-def clean_text(text):
-    return ' '.join(text.split())
+import scraper_v1 as scraper
+import tuple_to_csv
 
-def extract_table_data(table):
-    rows = table.query_selector_all('tr')
-    table_data = []
-    for row in rows:
-        cells = row.query_selector_all('td, th')
-        row_data = [clean_text(cell.inner_text()) for cell in cells]
-        table_data.append(row_data)
-    return table_data
+OUTPUT_DIR = f".local/output/{os.path.basename(os.path.dirname(__file__))}"
 
-def save_to_csv(data, filename):
-    with open(filename, 'w', newline='', encoding='utf-8') as f:
-        writer = csv.writer(f)
-        writer.writerows(data)
+def main():
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    import sys
+    if len(sys.argv) != 2:
+        print("Usage: python script_name.py <url>")
+        sys.exit(1)
+    
+    url = sys.argv[1]
 
-def main(url):
-    with sync_playwright() as p:
-        browser = p.chromium.launch()
-        page = browser.new_page()
-        page.goto(url)
+    # Transform the url into a printable filename, omit the protocol and replace slashes with underscores
+    filename = url.replace("https://", "").replace("http://", "").replace("/", "_")
 
-        # Find all table elements
-        tables = page.query_selector_all('table')
+    result = scraper.scrape_tables(url)
+    
+    for i, table in enumerate(result, 1):
+        print(f"Table {i}:")
+        csv_content = tuple_to_csv.tuples_to_csv_string(table)
+        print(csv_content)
+        print()
 
-        for i, table in enumerate(tables):
-            table_data = extract_table_data(table)
-            
-            if table_data:  # Only save if the table contains data
-                filename = f"table_{i+1}.csv"
-                save_to_csv(table_data, filename)
-                print(f"Saved data from table {i+1} to {filename}")
-            else:
-                print(f"Table {i+1} is empty, skipping.")
+        with open(f"{OUTPUT_DIR}/{filename}_{i}.csv", "w") as f:
+            f.write(csv_content)
 
-        browser.close()
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Web scraper for extracting table data to CSV files.")
-    parser.add_argument("url", help="The URL of the webpage to scrape")
-    args = parser.parse_args()
-
-    main(args.url)
+    main()
