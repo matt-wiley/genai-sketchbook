@@ -1,0 +1,11 @@
+langchain
+langchain-community
+openai 
+chromadb
+tiktoken
+anthropic 
+sentence-transformers
+sentence_transformers
+unstructured
+langchain-openai
+langgraph

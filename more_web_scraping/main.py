@@ -1,11 +1,17 @@
 import asyncio
+import aiohttp
+import aiofiles
 import sys
 import os
 import re
 import openai
+
 from urllib.parse import urlparse, urljoin
+
 from playwright.async_api import async_playwright
 from dotenv import load_dotenv
+
+from tokens import calculate_tokens
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,11 +23,24 @@ class WebScraper:
         self.visited_links = set()
         self.max_depth = max_depth
         # Derive the output directory if not provided
-        self.output_dir = output_dir or f".local/output/{self.sanitize_output_dir(base_url)}"
+        self.output_dir = output_dir or f".local/output/job_prospects/{self.sanitize_output_dir(base_url)}"
+        self.token_counts_csv = f"{self.output_dir}/token_counts.csv"
+        self._setup_token_counts_csv()
         os.makedirs(self.output_dir, exist_ok=True)
 
         # Initialize OpenAI API key
         openai.api_key = os.getenv("OPENAI_API_KEY")
+
+    # Create a function to setup the header line in the CSV file
+    def _setup_token_counts_csv(self):
+        os.makedirs(os.path.dirname(self.token_counts_csv), exist_ok=True)
+        with open(self.token_counts_csv, 'w', encoding='utf-8') as file:
+            file.write("URL,Token Count\n")
+
+    # Create a function to append a line to the token count to the CSV file
+    async def append_token_count_to_csv(self, url, token_count):
+        async with aiofiles.open(self.token_counts_csv, 'a', encoding='utf-8') as file:
+            await file.write(f"{url},{token_count}\n")
 
     def sanitize_output_dir(self, url):
         """Sanitize the BASE_URL to create a valid directory name."""
@@ -43,7 +62,7 @@ class WebScraper:
         self.visited_links.add(url)
         
         # Determine the text file path
-        text_file_path = self.sanitize_filename(url, extension=".txt")
+        text_file_path = self.sanitize_filename(url, extension=".md")
 
         # Check if the text content file already exists and is not empty
         if os.path.exists(text_file_path) and os.path.getsize(text_file_path) > 0:
@@ -58,7 +77,7 @@ class WebScraper:
             try:
                 await page.goto(url)
                 # Save the text content of the page
-                await self.save_page_content(url, page)
+                await self.save_page_content(url)
                 links = await page.eval_on_selector_all("a[href]", "elements => elements.map(el => el.href)")
             except Exception as e:
                 print(f"Error accessing {url}: {e}")
@@ -69,6 +88,11 @@ class WebScraper:
         
         # Filter links that match the original hostname
         filtered_links = [link for link in links if urlparse(link).hostname == self.base_hostname]
+
+        # Filter out links that are downloadable files
+        filtered_links = [link for link in filtered_links if not any(ext in link for ext in [".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"])]
+
+        filtered_links = list(set(filtered_links))  # Remove duplicates
         filtered_links = [urljoin(url, link) for link in filtered_links]
 
         print(f"Found {len(filtered_links)} links on {url}")
@@ -76,15 +100,51 @@ class WebScraper:
         for link in filtered_links:
             await self.fetch_links(link, depth + 1)
 
-    async def save_page_content(self, url, page):
-        """Save the text content of the current page to a file."""
-        content = await page.inner_text('body')
-        text_file_path = self.sanitize_filename(url, extension=".txt")
+    async def save_page_content(self, url: str) -> str:
+        """
+        Make a GET request to https://r.jina.ai/<url> and save the response as a markdown file.
         
-        with open(text_file_path, 'w', encoding='utf-8') as file:
-            file.write(content)
+        Args:
+            url (str): The URL to be passed to the Jina AI service.
         
-        print(f"Saved text content to {text_file_path}")
+        Returns:
+            str: The path of the saved markdown file.
+        
+        Raises:
+            aiohttp.ClientError: If there's an error with the HTTP request.
+            IOError: If there's an error writing to the file.
+        """
+        try:
+            jina_url = f"https://r.jina.ai/{url}"
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.get(jina_url) as response:
+                    response.raise_for_status()
+                    content = await response.text()
+
+            input_token_count = calculate_tokens(content)
+            print(f"Token count for {url}: {input_token_count}")
+
+            markdown_file_path = self.sanitize_filename(url, extension=".md")
+            
+            os.makedirs(os.path.dirname(markdown_file_path), exist_ok=True)
+            
+            await self.append_token_count_to_csv(url, input_token_count)
+            
+            async with aiofiles.open(markdown_file_path, 'w', encoding='utf-8') as file:
+                await file.write(content)
+
+            print(f"Saved markdown content to {markdown_file_path}")
+            return markdown_file_path
+        except aiohttp.ClientError as e:
+            print(f"Error fetching content from {jina_url}: {str(e)}")
+            raise
+        except IOError as e:
+            print(f"Error saving content from {url}: {str(e)}")
+            raise
+
+
+
 
     async def start(self):
         await self.fetch_links(self.base_url)
@@ -168,4 +228,4 @@ if __name__ == "__main__":
     asyncio.run(scraper.start())
 
     # Process the output files with OpenAI
-    scraper.process_files_with_openai()
+    # scraper.process_files_with_openai()
