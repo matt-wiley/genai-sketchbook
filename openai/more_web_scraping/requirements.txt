@@ -1,0 +1,6 @@
+aiohttp
+aiofiles
+openai
+playwright
+python-dotenv
+tiktoken
