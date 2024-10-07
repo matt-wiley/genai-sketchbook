@@ -1,2 +1,5 @@
 PyYaml
 jsonschema
+scikit-learn
+PyPDF2
+faiss-cpu

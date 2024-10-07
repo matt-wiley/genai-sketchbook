@@ -1,0 +1,10 @@
+embedding:
+  module: "tfidf_embeddings"
+  function: "generate_tfidf_embedding"
+  params:
+    max_features: 100
+
+faiss_index_path: faiss/mbw_experience/index.idx
+embedding_dimension: 100  # Dimension of your embeddings
+input_paths:
+  - "documents/Matt Wiley.pdf"

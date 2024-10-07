@@ -1,20 +1,38 @@
 import os
-import sqlite3
 from typing import List, Dict, Any, Callable
 import importlib
 import yaml
 import argparse
 import logging
-from jsonschema import validate
+from logging.handlers import RotatingFileHandler
+import PyPDF2
 
-# Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+from jsonschema import validate
+from faiss_storage import FAISSStorage
+
+
+# Update the logging setup
+log_file = 'embedding_generator.log'
+file_handler = RotatingFileHandler(log_file, maxBytes=1024 * 1024, backupCount=5)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+
+console_handler = logging.StreamHandler()
+console_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+console_handler.setFormatter(console_formatter)
+
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
 
 # Configuration schema
 config_schema = {
     "type": "object",
     "properties": {
+        "faiss_index_path": {"type": "string"},
+        "embedding_dimension": {"type": "integer"},
         "embedding": {
             "type": "object",
             "properties": {
@@ -31,7 +49,7 @@ config_schema = {
             "minItems": 1
         }
     },
-    "required": ["embedding", "database_path", "input_paths"]
+    "required": ["embedding", "faiss_index_path", "embedding_dimension", "input_paths"]
 }
 
 class EmbeddingGenerator:
@@ -63,50 +81,39 @@ class EmbeddingFactory:
 
         return EmbeddingGenerator(generate_func)
 
-class SQLiteStorage:
-    def __init__(self, db_path: str):
-        self.conn = sqlite3.connect(db_path)
-        self.create_table()
-
-    def create_table(self):
-        self.conn.execute('''
-        CREATE TABLE IF NOT EXISTS embeddings
-        (file_path TEXT PRIMARY KEY, embedding BLOB)
-        ''')
-
-    def store_embedding(self, file_path: str, embedding: List[float]):
-        self.conn.execute('INSERT OR REPLACE INTO embeddings VALUES (?, ?)',
-                          (file_path, str(embedding)))
-        self.conn.commit()
 
 class EmbeddingProcessor:
-    def __init__(self, embedding_generator: EmbeddingGenerator, storage: SQLiteStorage):
+    def __init__(self, embedding_generator: EmbeddingGenerator, storage: FAISSStorage):
         self.embedding_generator = embedding_generator
         self.storage = storage
 
+    def process_input(self, input_path: str):
+        if os.path.isfile(input_path):
+            self.process_file(input_path)
+        elif os.path.isdir(input_path):
+            for root, _, files in os.walk(input_path):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    self.process_file(file_path)
+        else:
+            logger.warning(f"Invalid input path: {input_path}")
+
     def process_file(self, file_path: str):
         try:
-            with open(file_path, 'r', encoding='utf-8') as file:
-                content = file.read()
+            if file_path.lower().endswith('.pdf'):
+                with open(file_path, 'rb') as file:
+                    reader = PyPDF2.PdfReader(file)
+                    content = ' '.join(page.extract_text() for page in reader.pages)
+            else:
+                with open(file_path, 'r', encoding='utf-8') as file:
+                    content = file.read()
+        
             embedding = self.embedding_generator.generate_embedding(content)
             self.storage.store_embedding(file_path, embedding)
             logger.info(f"Processed: {file_path}")
         except Exception as e:
             logger.error(f"Error processing {file_path}: {str(e)}")
 
-    def process_directory(self, directory_path: str):
-        for root, _, files in os.walk(directory_path):
-            for file in files:
-                file_path = os.path.join(root, file)
-                self.process_file(file_path)
-
-    def process_input(self, input_path: str):
-        if os.path.isfile(input_path):
-            self.process_file(input_path)
-        elif os.path.isdir(input_path):
-            self.process_directory(input_path)
-        else:
-            logger.warning(f"Invalid input path: {input_path}")
 
 def load_config(config_path: str) -> Dict[str, Any]:
     try:
@@ -121,19 +128,23 @@ def load_config(config_path: str) -> Dict[str, Any]:
         logger.error(f"Config validation error: {str(e)}")
         raise
 
+
 def main(config_path: str):
     try:
         config = load_config(config_path)
         embedding_generator = EmbeddingFactory.create_embedding_generator(config['embedding'])
-        storage = SQLiteStorage(config['database_path'])
+        storage = FAISSStorage(config['faiss_index_path'], config['embedding_dimension'])
         processor = EmbeddingProcessor(embedding_generator, storage)
 
         input_paths = config['input_paths']
         for input_path in input_paths:
             processor.process_input(input_path)
+        
+        logger.info(f"Total embeddings stored: {len(storage)}")
     except Exception as e:
         logger.error(f"An error occurred during execution: {str(e)}")
         raise
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate and store embeddings based on YAML configuration.")
@@ -141,6 +152,6 @@ if __name__ == "__main__":
     parser.add_argument("--log", help="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)", default="INFO")
     args = parser.parse_args()
 
-    logging.getLogger().setLevel(args.log.upper())
+    logger.setLevel(args.log.upper())
 
     main(args.config)
