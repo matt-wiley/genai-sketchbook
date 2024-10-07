@@ -1,0 +1,29 @@
+# Job Search CLI Configuration
+
+# Database settings
+database:
+  name: job_search.db
+
+# API settings
+api:
+  adzuna:
+    app_id: your_adzuna_app_id_here
+    api_key: your_adzuna_api_key_here
+  jooble:
+    api_key: your_jooble_api_key_here
+
+# Job search settings
+job_search:
+  default_location: London
+  default_days_old: 30
+  max_jobs_per_search: 100
+
+# User settings
+user:
+  default_top_matches: 10
+  default_skill_recommendations: 5
+
+# Logging settings
+logging:
+  level: INFO
+  file: job_search.log
